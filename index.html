@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>世田谷 3D ウォーク</title>
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css">
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  #cesiumContainer { position: absolute; inset: 0; }
+  #cesiumContainer canvas { touch-action: none; }
+  #panel {
+    position: absolute; top: max(10px, env(safe-area-inset-top)); left: 10px; z-index: 10;
+    width: min(340px, calc(100vw - 20px)); box-sizing: border-box;
+    background: rgba(15, 20, 30, .72); color: #fff; border-radius: 10px; padding: 10px 12px;
+    font-size: 13px; line-height: 1.5; backdrop-filter: blur(6px);
+  }
+  #status { font-weight: 600; margin-bottom: 4px; }
+  #status.err { color: #ff9a9a; white-space: pre-wrap; }
+  #info { font-variant-numeric: tabular-nums; opacity: .92; }
+  #tp { display: flex; gap: 6px; margin-top: 8px; }
+  #tp input { flex: 1; min-width: 0; font-size: 16px; padding: 6px 8px; border-radius: 6px; border: 0; }
+  #tp button, #preset { font-size: 14px; padding: 6px 10px; border-radius: 6px; border: 0; background: #3b82f6; color: #fff; }
+  #preset { width: 100%; margin-top: 6px; background: #374151; box-sizing: border-box; }
+  #row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #row button { flex: 1; font-size: 14px; padding: 6px 10px; border-radius: 6px; border: 0; background: #374151; color: #fff; }
+  #tpmsg { font-size: 12px; color: #ffd27a; min-height: 1em; margin-top: 4px; }
+  #help { position: absolute; left: 10px; bottom: 28px; z-index: 10; color: #fff; font-size: 12px; line-height: 1.6;
+          background: rgba(15, 20, 30, .55); border-radius: 8px; padding: 6px 10px; pointer-events: none; }
+  #credit { position: absolute; right: 10px; bottom: 28px; z-index: 10; color: #fff; font-size: 11px;
+            background: rgba(15, 20, 30, .55); border-radius: 8px; padding: 4px 8px; pointer-events: none; }
+  #stick { display: none; position: absolute; left: 24px; bottom: 60px; width: 120px; height: 120px; z-index: 11;
+           border-radius: 50%; background: rgba(255,255,255,.15); border: 2px solid rgba(255,255,255,.35); touch-action: none; }
+  #knob { position: absolute; left: 40px; top: 40px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.7); pointer-events: none; }
+  body.touch #stick { display: block; }
+  body.touch #help .kbd { display: none; }
+  #help .touchhelp { display: none; }
+  body.touch #help .touchhelp { display: block; }
+  #cross { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
+           background: rgba(255,255,255,.8); z-index: 9; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="cross"></div>
+
+<div id="panel">
+  <div id="status">準備中…</div>
+  <div id="info"></div>
+  <form id="tp" autocomplete="off">
+    <input id="tpInput" type="text" inputmode="text" placeholder="緯度, 経度（例 35.6464, 139.6531）">
+    <button type="submit">移動</button>
+  </form>
+  <select id="preset"><option value="">場所を選んで移動（目安の位置）</option></select>
+  <div id="row"><button id="qBtn" type="button">画質</button><button id="cBtn" type="button">色</button><button id="mBtn" type="button" style="flex-basis:100%">表示切替</button></div>
+  <div id="tpmsg"></div>
+</div>
+
+<div id="stick"><div id="knob"></div></div>
+
+<div id="help">
+  <div class="kbd">クリックで視点操作 / WASD 移動 / Shift 走る / F 飛行 / 飛行中 Space↑ C↓ / [ ] 建物の高さ補正 / Esc 視点解除</div>
+  <div class="touchhelp">左の丸で移動 / 画面右側をドラッグで視点 / 左上の入力欄で座標移動</div>
+</div>
+<div id="credit">建物データ: 国土交通省 Project PLATEAU（CC BY 4.0）</div>
+
+<script>
+// ============================================================
+// 設定（ここだけ書き換えればOK）
+// ============================================================
+const CONFIG = {
+  // Cesium ion のアクセストークンをここに貼る（公開前提のトークン。ionの管理画面で許可URLを制限しておく）
+  ION_TOKEN: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkNhTUZVOG1QaDFYRFl5WmIiLCJqdGkiOiI3MzRkYjdkMy02NjAyLTRlZTEtOTAxMS1mNzZiMmRiYmExZWQiLCJpZCI6NTMwNjExLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3OTI0NTMwMzV9.x9ePLbxL55zWTaaSfxX_6UKuJCSuL0dp_kwZNCTXb54",
+
+  WARD_CODE: "13112",            // 世田谷区の市区町村コード
+  MANUAL_TILESET_URL: "",        // 自動取得に失敗したときだけ、PLATEAUの建物 tileset.json のURLをここに入れる
+
+  START: { lat: 35.6464, lon: 139.6531, heading: 0 }, // 世田谷区役所あたり
+  EYE_HEIGHT: 1.7,               // 目線の高さ(m)
+  WALK_SPEED: 5,                 // 歩く速さ(m/秒)
+  RUN_SPEED: 14,                 // 走る速さ(m/秒)
+  FLY_SPEED: 60,                 // 飛行モードの速さ(m/秒)
+  BUILDING_HEIGHT_OFFSET: 0,     // 建物と地面がずれて見えるとき、建物を上下に動かす量(m)。ゲーム中も [ ] キーで調整できる
+};
+
+const PRESETS = [
+  ["世田谷区役所", 35.6464, 139.6531],
+  ["下北沢駅", 35.6613, 139.6681],
+  ["三軒茶屋駅", 35.6437, 139.6702],
+  ["二子玉川駅", 35.6116, 139.6263],
+  ["成城学園前駅", 35.6411, 139.5986],
+  ["駒沢オリンピック公園", 35.6272, 139.6595],
+];
+
+// 画質プリセット。sse は数字が大きいほど、遠くの建物を粗く・早めに省略して軽くなる
+const QUALITY = {
+  low:  { label: "低", sse: 28, globeSse: 6, scale: 0.75, msaa: 1, cache: 128 * 1024 * 1024 },
+  mid:  { label: "中", sse: 16, globeSse: 3, scale: 1.0,  msaa: 2, cache: 256 * 1024 * 1024 },
+  high: { label: "高", sse: 8,  globeSse: 2, scale: 1.0,  msaa: 4, cache: 512 * 1024 * 1024 },
+};
+
+const DATACATALOG_GRAPHQL ="https://api.plateauview.mlit.go.jp/datacatalog/graphql";
+const DATACATALOG_REST = "https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets";
+
+// <pure>
+// ---- 画面に依存しない関数（テストしやすいようにまとめてある）----
+function normalizeInput(s) {
+  return String(s)
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[．。]/g, ".")
+    .replace(/[－−]/g, "-")
+    .replace(/[，、]/g, ",");
+}
+
+// "35.6464, 139.6531" / "35.6464 139.6531" / 全角数字 / Googleマップからコピーした座標 に対応
+function parseLatLon(text) {
+  const nums = normalizeInput(text).match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length < 2) return null;
+  let lat = parseFloat(nums[0]);
+  let lon = parseFloat(nums[1]);
+  if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) { const t = lat; lat = lon; lon = t; } // 経度,緯度の順で入れた場合
+  if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) return null;
+  return { lat, lon };
+}
+
+// 北(m)・東(m)の移動量を、緯度経度(度)の変化量に直す
+function metersToDegrees(latDeg, dNorth, dEast) {
+  const R = 6371000;
+  const rad = Math.PI / 180;
+  return {
+    dLat: (dNorth / R) / rad,
+    dLon: (dEast / (R * Math.cos(latDeg * rad))) / rad,
+  };
+}
+
+// 建物データ候補の中から、好みのLODを選ぶ。preferLod=2: LOD2テクスチャ付き > LOD2テクスチャなし > LOD1
+function pickBuildingItem(items, preferLod) {
+  const score = (it) => {
+    const t = (it.name || "") + " " + (it.id || "");
+    const lod2 = /lod\s*2/i.test(t);
+    const lod1 = /lod\s*1/i.test(t);
+    const noTex = /テクスチャなし|no[_-]?texture|notexture/i.test(t);
+    if (preferLod === 1) {
+      if (lod1) return 4;
+      if (lod2 && noTex) return 3;
+      if (lod2) return 2;
+      return 1;
+    }
+    if (lod2 && !noTex) return 4;
+    if (lod2) return 3;
+    if (lod1) return 2;
+    return 1;
+  };
+  let best = null, bestScore = -1;
+  for (const it of items) {
+    const s = score(it);
+    if (s > bestScore) { best = it; bestScore = s; }
+  }
+  return best;
+}
+// </pure>
+
+// ============================================================
+// 画面部品
+// ============================================================
+const $ = (id) => document.getElementById(id);
+function setStatus(msg, isErr) {
+  const el = $("status");
+  el.textContent = msg;
+  el.className = isErr ? "err" : "";
+}
+function isTyping() {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "SELECT" || a.tagName === "TEXTAREA");
+}
+if (navigator.maxTouchPoints > 0) document.body.classList.add("touch");
+
+for (const [name, lat, lon] of PRESETS) {
+  const o = document.createElement("option");
+  o.value = lat + "," + lon;
+  o.textContent = name;
+  $("preset").appendChild(o);
+}
+
+// ============================================================
+// ゲーム状態
+// ============================================================
+// ?map=google で、写真ベースの3D地図（Cesium ion 経由の Google Photorealistic 3D Tiles）に切り替える
+const MAP_MODE = new URLSearchParams(location.search).get("map") === "google" ? "google" : "plateau";
+
+const state = {
+  ready: false,
+  lat: CONFIG.START.lat,
+  lon: CONFIG.START.lon,
+  heading: Cesium.Math.toRadians(CONFIG.START.heading),
+  pitch: 0,
+  groundH: 0,        // 地面の高さ（楕円体高, m）
+  flyH: 0,           // 飛行モードの高さ
+  fly: false,
+  buildingOffset: CONFIG.BUILDING_HEIGHT_OFFSET,
+  tilesetLabel: "（未読み込み）",
+  // ?q=low|mid|high で指定。指定がなければ、タッチ端末(iPadなど)は low、それ以外は mid
+  quality: (() => {
+    const q = new URLSearchParams(location.search).get("q");
+    return QUALITY[q] ? q : (navigator.maxTouchPoints > 0 ? "low" : "mid");
+  })(),
+  colorMode: "height",   // "height"=高さ別に色を付ける / "off"=データそのまま
+  textured: false,
+  propIds: [],
+};
+
+let viewer = null;
+let terrainProvider = null;
+let tileset = null;
+
+// ============================================================
+// 建物データ（PLATEAU）のURLを公式カタログから探す
+// ============================================================
+async function fetchItemsGraphQL(code) {
+  const query = `query { area(code: "${code}") { datasets { id name items { id name url } } } }`;
+  const r = await fetch(DATACATALOG_GRAPHQL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!r.ok) throw new Error("GraphQL HTTP " + r.status);
+  const j = await r.json();
+  const datasets = (j.data && j.data.area && j.data.area.datasets) || [];
+  return datasets
+    .filter(d => /bldg/i.test(d.id || "") || /建築物/.test(d.name || ""))
+    .flatMap(d => d.items || [])
+    .filter(i => i.url && /tileset\.json/.test(i.url));
+}
+
+async function fetchItemsREST(code) {
+  const r = await fetch(DATACATALOG_REST);
+  if (!r.ok) throw new Error("REST HTTP " + r.status);
+  const j = await r.json();
+  return (j.datasets || [])
+    .filter(d => d.type_en === "bldg" && d.format === "3D Tiles" && (d.ward_code === code || d.city_code === code))
+    .map(d => ({
+      id: d.id,
+      name: "LOD" + d.lod + (d.texture === false ? "（テクスチャなし）" : ""),
+      url: d.url,
+    }));
+}
+
+async function resolveBuildingTilesetUrl() {
+  if (CONFIG.MANUAL_TILESET_URL) return { url: CONFIG.MANUAL_TILESET_URL, label: "手動指定のURL", textured: false };
+
+  // ?lod=1 / ?lod=2 で指定。指定がなければ、タッチ端末は軽いLOD1、それ以外はLOD2を優先
+  const lodParam = new URLSearchParams(location.search).get("lod");
+  const preferLod = lodParam === "2" ? 2 : lodParam === "1" ? 1 : (navigator.maxTouchPoints > 0 ? 1 : 2);
+
+  let items = [];
+  const errors = [];
+  // ?ward=13113 のように指定すると、別の区のデータを試せる（写真付きLOD2がある区を探すときに使う）
+  const ward = new URLSearchParams(location.search).get("ward") || CONFIG.WARD_CODE;
+  try { items = await fetchItemsGraphQL(ward); } catch (e) { errors.push("GraphQL: " + e.message); }
+  if (!items.length) {
+    try { items = await fetchItemsREST(ward); } catch (e) { errors.push("REST: " + e.message); }
+  }
+  if (!items.length) {
+    throw new Error("PLATEAUの建物データが見つかりませんでした。\n" + errors.join("\n") +
+      "\nCONFIG.MANUAL_TILESET_URL に tileset.json のURLを入れてください。");
+  }
+  const best = pickBuildingItem(items, preferLod);
+  const t = (best.name || "") + " " + (best.id || "");
+  const textured = /lod\s*2/i.test(t) && !/テクスチャなし|no[_-]?texture|notexture/i.test(t);
+  return { url: best.url, label: best.name || best.id, textured };
+}
+
+// ============================================================
+// 建物の高さ補正
+// ============================================================
+function applyBuildingOffset() {
+  if (!tileset) return;
+  if (!state.buildingOffset) { tileset.modelMatrix = Cesium.Matrix4.clone(Cesium.Matrix4.IDENTITY); return; }
+  // 「上」の向きは、いま立っている場所で決める（写真の3D地図は範囲が地球全体で、データの中心を使うと計算できない）
+  const p = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 0);
+  const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(p, new Cesium.Cartesian3());
+  if (!up) return;
+  const t = Cesium.Cartesian3.multiplyByScalar(up, state.buildingOffset, new Cesium.Cartesian3());
+  tileset.modelMatrix = Cesium.Matrix4.fromTranslation(t);
+}
+
+// ============================================================
+// 画質
+// ============================================================
+function applyQuality(name) {
+  state.quality = name;
+  const q = QUALITY[name];
+  if (viewer) {
+    viewer.resolutionScale = q.scale;
+    viewer.scene.globe.maximumScreenSpaceError = q.globeSse;
+    viewer.scene.msaaSamples = q.msaa;
+  }
+  if (tileset) {
+    tileset.maximumScreenSpaceError = q.sse;
+    tileset.cacheBytes = q.cache;
+    tileset.maximumCacheOverflowBytes = q.cache;
+  }
+  $("qBtn").textContent = "画質: " + q.label;
+}
+
+// ============================================================
+// 建物の色（テクスチャなしの建物が真っ白になるのを防ぐ）
+// ============================================================
+let heightProp = null;   // null=判定中 / false=高さの属性が見つからない / 文字列=属性名
+let detectTries = 0;
+
+function makeStyle() {
+  if (!heightProp) return new Cesium.Cesium3DTileStyle({ color: "color('#bfb5a5')" });
+  const v = "Number(${feature['" + heightProp + "']})";
+  return new Cesium.Cesium3DTileStyle({
+    color: {
+      conditions: [
+        [v + " >= 100", "color('#5f7391')"],
+        [v + " >= 45", "color('#7b8fab')"],
+        [v + " >= 20", "color('#9fb0c4')"],
+        [v + " >= 9", "color('#c4b8a6')"],
+        ["true", "color('#c9b79c')"],
+      ],
+    },
+  });
+}
+
+function applyColorMode() {
+  $("cBtn").textContent = "色: " + (state.colorMode === "off" ? "なし" : "高さ");
+  if (!tileset) return;
+  tileset.style = state.colorMode === "off" ? undefined : makeStyle();
+}
+
+// 読み込めた建物から、高さの属性名を探す（データによって名前が違うため）
+function detectHeightProp(tile) {
+  if (heightProp !== null) return;
+  try {
+    const c = tile.content;
+    const list = c.innerContents && c.innerContents.length ? c.innerContents : [c];
+    for (const cc of list) {
+      if (!(cc.featuresLength > 0)) continue;
+      const ids = cc.getFeature(0).getPropertyIds([]);
+      if (!ids.length) { if (++detectTries > 40) { heightProp = false; applyColorMode(); } return; }
+      state.propIds = ids;
+      heightProp = ids.find(id => /measuredheight|計測高さ/i.test(id)) || ids.find(id => /height|高さ/i.test(id)) || false;
+      applyColorMode();
+      return;
+    }
+  } catch (e) { /* 次のタイルでもう一度試す */ }
+}
+
+$("qBtn").addEventListener("click", (e) => {
+  const order = ["low", "mid", "high"];
+  applyQuality(order[(order.indexOf(state.quality) + 1) % order.length]);
+  e.currentTarget.blur();
+});
+$("cBtn").addEventListener("click", (e) => {
+  state.colorMode = state.colorMode === "off" ? "height" : "off";
+  applyColorMode();
+  e.currentTarget.blur();
+});
+$("mBtn").textContent = MAP_MODE === "google" ? "表示: 写真の3D地図 → PLATEAUに切替" : "表示: PLATEAU → 写真の3D地図に切替";
+$("mBtn").addEventListener("click", () => {
+  const u = new URL(location.href);
+  if (MAP_MODE === "google") u.searchParams.delete("map"); else u.searchParams.set("map", "google");
+  location.href = u.toString();
+});
+if (MAP_MODE === "google") {
+  $("cBtn").style.display = "none";
+  $("credit").textContent = "3D地図: Google（Cesium ion経由）";
+}
+
+// 写真の3D地図モードでは地球の地面を隠すので、足元の高さは地形データから時々取り直す
+let groundBusy = false, lastGroundReq = 0;
+function requestGround(now) {
+  if (groundBusy || now - lastGroundReq < 300 || !terrainProvider) return;
+  groundBusy = true;
+  lastGroundReq = now;
+  Cesium.sampleTerrainMostDetailed(terrainProvider, [Cesium.Cartographic.fromDegrees(state.lon, state.lat)])
+    .then(([r]) => { if (r && typeof r.height === "number") state.targetGround = r.height; })
+    .catch(() => {})
+    .finally(() => { groundBusy = false; });
+}
+
+applyQuality(state.quality);
+applyColorMode();
+
+// ============================================================
+// テレポート
+// ============================================================
+async function teleport(lat, lon, headingDeg) {
+  const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+  let h = 0;
+  try {
+    const [res] = await Cesium.sampleTerrainMostDetailed(terrainProvider, [carto]);
+    if (res && typeof res.height === "number") h = res.height;
+  } catch (e) { /* 取れなければ0のまま。あとで自動で地面に合う */ }
+  state.lat = lat;
+  state.lon = lon;
+  state.groundH = h;
+  if (state.fly) state.flyH = Math.max(state.flyH, h + CONFIG.EYE_HEIGHT);
+  if (typeof headingDeg === "number") state.heading = Cesium.Math.toRadians(headingDeg);
+  state.ready = true;
+}
+
+$("tp").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const p = parseLatLon($("tpInput").value);
+  if (!p) {
+    $("tpmsg").textContent = "「緯度, 経度」の形で入力してください（例 35.6464, 139.6531）";
+    return;
+  }
+  $("tpmsg").textContent = "";
+  await teleport(p.lat, p.lon);
+  $("tpInput").blur();
+});
+
+$("preset").addEventListener("change", async (e) => {
+  const p = parseLatLon(e.target.value);
+  if (p) { await teleport(p.lat, p.lon); }
+  e.target.value = "";
+  e.target.blur();
+});
+
+// ============================================================
+// 入力（キーボード / マウス / タッチ）
+// ============================================================
+const keys = new Set();
+const touchMove = { x: 0, y: 0 };
+const PITCH_LIMIT = Cesium.Math.toRadians(89);
+const clampPitch = (p) => Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, p));
+
+window.addEventListener("keydown", (e) => {
+  if (isTyping()) return;
+  keys.add(e.code);
+  if (e.code === "KeyF" && !e.repeat) {
+    state.fly = !state.fly;
+    if (state.fly) state.flyH = state.groundH + CONFIG.EYE_HEIGHT + 30;
+  }
+  if (e.code === "BracketRight" || e.code === "BracketLeft") {
+    state.buildingOffset += e.code === "BracketRight" ? 1 : -1;
+    applyBuildingOffset();
+  }
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => keys.clear());
+
+function setupPointerInput(canvas) {
+  document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    state.heading += e.movementX * 0.0025;
+    state.pitch = clampPitch(state.pitch - e.movementY * 0.0025);
+  });
+
+  let lookId = null, lastX = 0, lastY = 0;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse") {
+      if (canvas.requestPointerLock) canvas.requestPointerLock();
+      return;
+    }
+    if (lookId === null && e.clientX > window.innerWidth * 0.35) {
+      lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== lookId) return;
+    state.heading += (e.clientX - lastX) * 0.004;
+    state.pitch = clampPitch(state.pitch - (e.clientY - lastY) * 0.004);
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  const endLook = (e) => { if (e.pointerId === lookId) lookId = null; };
+  canvas.addEventListener("pointerup", endLook);
+  canvas.addEventListener("pointercancel", endLook);
+
+  // 仮想ジョイスティック
+  const stick = $("stick"), knob = $("knob");
+  let stickId = null, cx = 0, cy = 0;
+  const MAXR = 50;
+  const updateStick = (e) => {
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const len = Math.hypot(dx, dy);
+    if (len > MAXR) { dx *= MAXR / len; dy *= MAXR / len; }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    touchMove.x = dx / MAXR;
+    touchMove.y = -dy / MAXR;
+  };
+  stick.addEventListener("pointerdown", (e) => {
+    stickId = e.pointerId;
+    stick.setPointerCapture(e.pointerId);
+    const r = stick.getBoundingClientRect();
+    cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+    updateStick(e);
+  });
+  stick.addEventListener("pointermove", (e) => { if (e.pointerId === stickId) updateStick(e); });
+  const endStick = (e) => {
+    if (e.pointerId !== stickId) return;
+    stickId = null; touchMove.x = 0; touchMove.y = 0;
+    knob.style.transform = "translate(0px, 0px)";
+  };
+  stick.addEventListener("pointerup", endStick);
+  stick.addEventListener("pointercancel", endStick);
+
+  // 入力欄を触ったらポインタロックを解除
+  $("panel").addEventListener("pointerdown", () => { if (document.exitPointerLock) document.exitPointerLock(); });
+}
+
+// ============================================================
+// 毎フレームの更新
+// ============================================================
+let lastTime = performance.now();
+let lastHud = 0;
+
+function frame() {
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - lastTime) / 1000);
+  lastTime = now;
+  if (!state.ready) return;
+
+  // 矢印キーで視点
+  if (keys.has("ArrowLeft")) state.heading -= 1.6 * dt;
+  if (keys.has("ArrowRight")) state.heading += 1.6 * dt;
+  if (keys.has("ArrowUp")) state.pitch = clampPitch(state.pitch + 1.2 * dt);
+  if (keys.has("ArrowDown")) state.pitch = clampPitch(state.pitch - 1.2 * dt);
+
+  // 移動
+  let fwd = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0) + touchMove.y;
+  let right = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0) + touchMove.x;
+  const len = Math.hypot(fwd, right);
+  if (len > 1) { fwd /= len; right /= len; }
+  const run = keys.has("ShiftLeft") || keys.has("ShiftRight") || Math.hypot(touchMove.x, touchMove.y) > 0.95;
+  let speed = state.fly ? CONFIG.FLY_SPEED : (run ? CONFIG.RUN_SPEED : CONFIG.WALK_SPEED);
+  if (state.fly && run) speed *= 4;
+
+  const h = state.heading;
+  const dNorth = (fwd * Math.cos(h) - right * Math.sin(h)) * speed * dt;
+  const dEast = (fwd * Math.sin(h) + right * Math.cos(h)) * speed * dt;
+  const d = metersToDegrees(state.lat, dNorth, dEast);
+  state.lat = Math.max(-89.9, Math.min(89.9, state.lat + d.dLat));
+  state.lon += d.dLon;
+  if (state.lon > 180) state.lon -= 360;
+  if (state.lon < -180) state.lon += 360;
+
+  // 地面の高さ（読み込み済みの地形から取得。まだなら前の値のまま）
+  const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
+  let g;
+  if (MAP_MODE === "google") { requestGround(now); g = state.targetGround; }
+  else g = viewer.scene.globe.getHeight(carto);
+  if (typeof g === "number") state.groundH += (g - state.groundH) * Math.min(1, dt * 12);
+
+  let eyeH;
+  if (state.fly) {
+    const up = (keys.has("Space") || keys.has("KeyE") ? 1 : 0) - (keys.has("KeyC") || keys.has("KeyQ") ? 1 : 0);
+    state.flyH = Math.max(state.groundH + 2, state.flyH + up * speed * dt);
+    eyeH = state.flyH;
+  } else {
+    eyeH = state.groundH + CONFIG.EYE_HEIGHT;
+  }
+
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, eyeH),
+    orientation: { heading: state.heading, pitch: state.pitch, roll: 0 },
+  });
+
+  if (now - lastHud > 200) {
+    lastHud = now;
+    const deg = ((Cesium.Math.toDegrees(state.heading) % 360) + 360) % 360;
+    $("info").textContent =
+      `緯度 ${state.lat.toFixed(5)}  経度 ${state.lon.toFixed(5)}\n` +
+      `高さ ${eyeH.toFixed(1)} m  向き ${deg.toFixed(0)}°  ${state.fly ? "飛行" : "歩行"}\n` +
+      `建物: ${state.tilesetLabel}  補正 ${state.buildingOffset >= 0 ? "+" : ""}${state.buildingOffset} m\n` +
+      `高さ属性: ${heightProp === null ? "判定中" : (heightProp || "なし")}`;
+    $("info").style.whiteSpace = "pre";
+  }
+}
+
+// ============================================================
+// 起動
+// ============================================================
+async function main() {
+  if (!CONFIG.ION_TOKEN || CONFIG.ION_TOKEN.indexOf("ここに") === 0) {
+    setStatus("index.html の先頭にある CONFIG.ION_TOKEN に、Cesium ion のトークンを貼ってください。", true);
+    return;
+  }
+  Cesium.Ion.defaultAccessToken = CONFIG.ION_TOKEN;
+
+  setStatus("地形を読み込み中…");
+  terrainProvider = await Cesium.createWorldTerrainAsync();
+
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    terrainProvider,
+    baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+    navigationHelpButton: false, animation: false, timeline: false, fullscreenButton: false,
+    infoBox: false, selectionIndicator: false,
+  });
+  const scene = viewer.scene;
+  scene.screenSpaceCameraController.enableInputs = false;  // Cesium標準のカメラ操作は使わない
+  scene.globe.depthTestAgainstTerrain = true;
+  scene.globe.enableLighting = false;
+  viewer.camera.frustum.fov = Cesium.Math.toRadians(70);
+  viewer.clock.currentTime = Cesium.JulianDate.fromIso8601("2026-06-21T03:00:00Z"); // 日本時間の正午ごろ
+  viewer.clock.shouldAnimate = false;
+
+  setupPointerInput(viewer.canvas);
+
+  const tilesetOptions = {
+    maximumScreenSpaceError: QUALITY[state.quality].sse,
+    dynamicScreenSpaceError: true,
+  };
+  if (MAP_MODE === "google") {
+    setStatus("写真の3D地図を読み込み中…");
+    scene.globe.show = false;   // 3D地図に地面も含まれるので、地球の地面は隠す
+    tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207, tilesetOptions);
+    scene.primitives.add(tileset);
+    state.tilesetLabel = "写真の3D地図(Google)";
+    state.colorMode = "off";
+    applyBuildingOffset();
+    applyQuality(state.quality);
+  } else {
+    setStatus("PLATEAUの建物データを探しています…");
+    const found = await resolveBuildingTilesetUrl();
+    setStatus("建物を読み込み中（" + found.label + "）…");
+    tileset = await Cesium.Cesium3DTileset.fromUrl(found.url, tilesetOptions);
+    scene.primitives.add(tileset);
+    state.tilesetLabel = found.label;
+    state.textured = found.textured;
+    if (found.textured) state.colorMode = "off";   // 写真テクスチャ付きならそのまま見せる
+    tileset.tileVisible.addEventListener(detectHeightProp);
+    applyBuildingOffset();
+    applyQuality(state.quality);
+    applyColorMode();
+  }
+
+  await teleport(CONFIG.START.lat, CONFIG.START.lon, CONFIG.START.heading);
+  scene.preRender.addEventListener(frame);
+
+  window.game = { state, teleport, viewer, tileset }; // あとでマルチプレイ処理をつなぐ入口
+  setStatus("読み込み完了。歩き回れます");
+}
+
+main().catch((err) => {
+  console.error(err);
+  const where = err && err.stack ? "\n" + String(err.stack).split("\n").slice(0, 4).join("\n") : "";
+  setStatus("エラー: " + (err && err.message ? err.message : err) + where, true);
+});
+</script>
+</body>
+</html>
